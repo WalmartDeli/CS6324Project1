@@ -1,0 +1,180 @@
+// Payton
+Create(file_name, user_name, password);
+    create file directory from file_name
+    create and populate metadata
+        000-127 = username + padding
+        128-255 = 128 byte random salt
+        256-383 = hash(salt||password) + padding
+        384-511 = length of og file(bytes) + padding
+        512-639 = IV + padding
+    write metadata to "../filename.txt/0"
+
+    generate key from metadata
+    generateMAC("../filename.txt/0")
+        640-767 = MAC(0 - n)
+        
+
+// Lizbeth
+userAuthentication(file_name, password)
+    get username from file
+    get file password hash and file username
+    if user password meets hash(password||salt)
+        key = keygeneration()
+        return key
+    else
+        throw passwordexception
+
+//Payton Does this
+keyGeneration(file_name, password)
+    RC4 with salt + password
+    return keystream
+
+//Mason
+generateMac(key,fileDir)
+
+    Mac(0) = Mac(first 512 bytes of "0")
+
+    Mac(MAC(0) || Mac(1-n))
+
+
+// Payton
+Encrypt(byte[] content, key, IV)
+    return byte[] cipher
+
+// Payton
+Decrypt(bytearray[] content, key, IV)
+    return byte[] message
+
+// Lizbeth
+findUser(file_name)
+    goto file directoyr
+    open metadata file
+    t/f = checkintegrity()
+    read username
+    return username
+
+// Lizbeth
+length(file_name, password)
+    goto file directoyr
+    open metadata file
+    t/f = checkintegrity()
+    get file password hash and file username
+    if user password meets hash(password||salt)
+        read length
+        return length
+    else
+        throw passwordexception
+        return 0
+
+// Payton
+read(filename, starting position, length, password)
+
+    create new file from filename
+    integritycheck()
+    length()
+    check to make length is not > file length.
+    
+    calculate first and last block to read
+
+    key = userAuthentication(password)
+
+    string toReturn
+
+    for (int i = start_block + 1; i <= end_block + 1; i++) {
+        byte[] block = decyrpt(key, block);
+        String temp = new String(block);
+        if (i == end_block + 1) {
+            temp = temp.substring(0, starting_position + len - end_block * Config.BLOCK_SIZE);
+        }
+        if (i == start_block + 1) {
+            temp = temp.substring(starting_position - start_block * Config.BLOCK_SIZE);
+        }
+        toReturn += temp;
+    }
+
+    return toReturn.getBytes("UTF-8");
+
+// Mason
+write(file_name, starting_position, content, password)
+
+
+    Convert content into a string
+    create new file from filename
+    integritycheck()
+    length()
+    check to make length is not > file length.
+
+    get length of content
+    calculate first and last block to read
+
+    key = userAuthentication(password)
+
+    get IV
+    decrypt all blocks
+    generate new iv
+    write content to file
+    encrypt all blocks(iv, key)
+
+    save_to_file(toWrite.getBytes(), new File(root, Integer.toString(1->n)));
+
+
+    //update meta data
+    create and populate metadata
+        000-127 = username + padding                    Same
+        128-255 = 128 byte random salt                  Same
+        256-383 = hash(salt||password) + padding        Same
+        384-511 = length of og file(bytes) + padding    Different
+        512-639 = IV + padding                          Different
+    write metadata to "../filename.txt/0"        save_to_file(toWrite.getBytes(), new File(root, "0"));
+
+    generate key from metadata
+    generateMAC("../filename.txt/0")
+        640-767 = MAC(0 - n)
+    write mac to file 0
+
+
+// Lizbeth
+cut(file_name,length)
+
+
+    create new file from filename
+    integritycheck()
+    length()
+    check to make length is not > file length.
+
+    calculate last block to read
+
+    key = userAuthentication(password)
+
+    get IV
+    decrypt all blocks
+    generate new iv
+    cut content from file
+    encrypt all blocks(iv, key)
+
+    //update meta data
+    create and populate metadata
+        000-127 = username + padding                    Same
+        128-255 = 128 byte random salt                  Same
+        256-383 = hash(salt||password) + padding        Same
+        384-511 = length of og file(bytes) + padding    Different
+        512-639 = IV + padding                          Different
+    write metadata to "../filename.txt/0"        save_to_file(toWrite.getBytes(), new File(root, "0"));
+
+    generate key from metadata
+    generateMAC("../filename.txt/0")
+        640-767 = MAC(0 - n)
+    write mac to file 0
+
+// mason
+check_integrity(file_name, password)
+    get mac from meta data
+    userAuthentication()
+    mac = generateMac(key,fileDir)
+    if mac != mac
+        throw exception
+        return false
+    else
+        return true
+
+

@@ -13,9 +13,31 @@ public class EFS extends Utility {
 
         dir.mkdirs();
         File meta = new File(dir, "0");
+
         String toWrite = "";
-        toWrite = "0\n";  //length of the file
-        toWrite += user_name;   //add username
+        //toWrite = "0\n";  //length of the file
+        //toWrite += user_name;   //add username
+
+        // add username + padding to first 128 bytes of toWrite
+        toWrite = user_name;
+        while(toWrite.length() < (Config.BLOCK_SIZE/8)) {
+            toWrite += '\0';
+        }
+        // add random salt(128 bytes) to next 128 bytes of toWrite
+        String salt = new String(secureRandomNumber(Config.BLOCK_SIZE/8));
+        toWrite += salt;
+
+
+        //add Sha256(salt + password) and padding.
+        String saltedPassword = salt + password;
+        String saltedHash = new String(Sha256(saltedPassword.getBytes()));
+        toWrite += saltedHash;
+        while(toWrite.length() < 3 * (Config.BLOCK_SIZE/8)) {
+            toWrite += '\0';
+        }
+
+        //Initialize Length then pad to next 128 bytes.
+        
 
         //padding
         while (toWrite.length() < Config.BLOCK_SIZE) {
@@ -188,4 +210,25 @@ public class EFS extends Utility {
         }
         save_to_file(toWrite.getBytes(), new File(root, "0"));
     }
+
+    public byte[] userAuthentication(String file_name, String password) {
+
+    }
+
+    public byte[] generateMAC(String file_name, String key) {
+
+    }
+    
+    public byte[] keyGeneration(String file_name, String password) {
+
+    }
+
+    public byte[] CTREncrypt(byte[] content, byte[] key[], byte[] iv) {
+
+    }
+
+    public byte[] CTRDecrypt(byte[] content, byte[] key[], byte[] iv) {
+
+    }
+
 }
