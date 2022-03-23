@@ -91,10 +91,10 @@ public class EFS extends Utility {
 
         save_to_file(metafile, meta); //write metadata to get mac from.
 
-        //Fake Temporary MAC
-        byte[] MAC = "abcdefghijklmnopqrstuvwxyz012345".getBytes();
+        // generate MAC
+        String key = byteArray2String(keyGeneration(file_name, password));
+        byte[] MAC = generateMAC(file_name, key);
         
-
         //rewrite metafile w/ mac
         for(int i=0; i<Config.BLOCK_SIZE; i++) {
             if(i < 6 * (Config.BLOCK_SIZE/8)) {
@@ -280,8 +280,23 @@ public class EFS extends Utility {
         return null;
     }
 
-    public byte[] generateMAC(String file_name, String key) {
-        return null;
+    public byte[] generateMAC(String file_name, String key) throws Exception {
+        File meta = new File(file_name, "0");
+        byte[] fileData = read_from_file(meta);
+
+        //get portion of metadata without MAC
+        byte[] metaSlice = new byte[767];
+        for(int i = 0; i < 768; i++) {
+            metaSlice[i] = fileData[i];
+        }
+
+        // concat key and metadata
+        byte[] keyBytes = key.getBytes();
+        byte[] keyAndMetadata = concatArrays(keyBytes, metaSlice);
+        
+        byte[] hash = hash_SHA256(keyAndMetadata);
+
+        return hash;
     }
     
     public byte[] keyGeneration(String file_name, String password) throws Exception {
