@@ -92,7 +92,7 @@ public class EFS extends Utility {
         save_to_file(metafile, meta); //write metadata to get mac from.
 
         // generate MAC
-        String key = byteArray2String(keyGeneration(file_name, password));
+        byte[] key = keyGeneration(file_name, password);
         byte[] MAC = generateMAC(file_name, key);
         
         //rewrite metafile w/ mac
@@ -280,20 +280,18 @@ public class EFS extends Utility {
         return null;
     }
 
-    public byte[] generateMAC(String file_name, String key) throws Exception {
+    public byte[] generateMAC(String file_name, byte[] key) throws Exception {
         File meta = new File(file_name, "0");
         byte[] fileData = read_from_file(meta);
 
         //get portion of metadata without MAC
-        byte[] metaSlice = new byte[767];
+        byte[] metaSlice = new byte[768];
         for(int i = 0; i < 768; i++) {
             metaSlice[i] = fileData[i];
         }
 
-        // concat key and metadata
-        byte[] keyBytes = key.getBytes();
-        byte[] keyAndMetadata = concatArrays(keyBytes, metaSlice);
-        
+        // concat key and metadata and get hash
+        byte[] keyAndMetadata = concatArrays(key, metaSlice);
         byte[] hash = hash_SHA256(keyAndMetadata);
 
         return hash;
