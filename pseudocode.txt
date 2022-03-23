@@ -3,15 +3,16 @@ Create(file_name, user_name, password);
     create file directory from file_name
     create and populate metadata
         000-127 = username + padding
-        128-255 = 128 byte random salt
-        256-383 = hash(salt||password) + padding
-        384-511 = length of og file(bytes) + padding
-        512-639 = IV + padding
+        128-255 = 128 bit (16 bytes) random salt
+        256-383 = hash_sha256(salt||password) + padding
+        384-511 = length of of file(bytes) + padding
+        512-639 = CTR IV + padding
+        640-767 = Keygen IV + Padding
     write metadata to "../filename.txt/0"
 
     generate key from metadata
     generateMAC("../filename.txt/0")
-        640-767 = MAC(0 - n)
+        768-895 = MAC(0 - n)
         
 
 // Lizbeth
