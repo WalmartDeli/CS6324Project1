@@ -15,37 +15,101 @@ public class EFS extends Utility {
         dir.mkdirs();
         File meta = new File(dir, "0");
 
-        String toWrite = "";
-        //toWrite = "0\n";  //length of the file
-        //toWrite += user_name;   //add username
-
-        // add username + padding to first 128 bytes of toWrite
-        toWrite = user_name;
-        while(toWrite.length() < (Config.BLOCK_SIZE/8)) {
-            toWrite += '\0';
+        //Create username portion of Block
+        while(user_name.length() < (Config.BLOCK_SIZE/8)) {
+            user_name += '\0';
         }
-        // add random salt(128 bytes) to next 128 bytes of toWrite
-        String salt = new String(secureRandomNumber(Config.BLOCK_SIZE/8));
-        toWrite += salt;
+        byte[] username = user_name.getBytes();
 
-
-        //add Sha256(salt + password) and padding.
-        String saltedPassword = salt + password;
-        String saltedHash = new String(hash_SHA256(saltedPassword.getBytes()));
-        toWrite += saltedHash;
-        while(toWrite.length() < 3 * (Config.BLOCK_SIZE/8)) {
-            toWrite += '\0';
+        // Create 128 bit (16 bytes) random salt
+        byte[] salt = new byte[Config.BLOCK_SIZE/8];
+        byte[] randomNum = secureRandomNumber(16);
+        for(int i=0; i<Config.BLOCK_SIZE/8; i++) {
+            if(i < 16){
+                salt[i] = randomNum[i];
+            }
+            else {
+                salt[i] = '\0';
+            }
         }
 
-        //Initialize Length then pad to next 128 bytes.
+        // Create 256 bit (32 bytes) salted password hash
+        byte[] saltedHash = new byte[Config.BLOCK_SIZE/8];
+        byte[] hash256 = concatArrays(salt, password.getBytes());
+        for(int i=0; i<Config.BLOCK_SIZE/8; i++) {
+            if(i < 32){
+                saltedHash[i] = hash256[i];
+            }
+            else {
+                saltedHash[i] = '\0';
+            }
+        }
+
+        //Set file_size(bytes) of File to 0 and create seciton
+        String file_size = "0";
+        while(file_size.length() < (Config.BLOCK_SIZE/8)) {
+            file_size += '\0';
+        }
+        byte[] filesize = file_size.getBytes();
+
+        //Generate and Set CTR IV in metadata
+        byte[] CTR_IV = new byte[Config.BLOCK_SIZE/8];
+        randomNum = secureRandomNumber(16);
+        for(int i=0; i<Config.BLOCK_SIZE/8; i++) {
+            if(i < 16){
+                CTR_IV[i] = randomNum[i];
+            }
+            else {
+                CTR_IV[i] = '\0';
+            }
+        }
+
+        //Generate and Set Keygen IV in metadata
+        byte[] Key_IV = new byte[Config.BLOCK_SIZE/8];
+        randomNum = secureRandomNumber(16);
+        for(int i=0; i<Config.BLOCK_SIZE/8; i++) {
+            if(i < 16){
+                Key_IV[i] = randomNum[i];
+            }
+            else {
+                Key_IV[i] = '\0';
+            }
+        }
+        
+        // Initial Metadata
+        byte[] toWrite = concatArrays(username, concatArrays(salt, concatArrays(saltedHash, concatArrays(filesize, concatArrays(CTR_IV, Key_IV)))));
+        // Pad for Block Size
+        byte[] metafile = new byte[Config.BLOCK_SIZE];
+        for(int i=0; i<Config.BLOCK_SIZE; i++) {
+            if(i < 6 * (Config.BLOCK_SIZE/8)) {
+                metafile[i] = toWrite[i];
+            }
+            else {
+                metafile[i] = '\0';
+            }
+        }
+
+        save_to_file(metafile, meta); //write metadata to get mac from.
+
+        //Fake Temporary MAC
+        byte[] MAC = "abcdefghijklmnopqrstuvwxyz012345".getBytes();
         
 
-        //padding
-        while (toWrite.length() < Config.BLOCK_SIZE) {
-            toWrite += '\0';
+        //rewrite metafile w/ mac
+        for(int i=0; i<Config.BLOCK_SIZE; i++) {
+            if(i < 6 * (Config.BLOCK_SIZE/8)) {
+                metafile[i] = toWrite[i];
+            }
+            else if( (i >= 6 * (Config.BLOCK_SIZE/8) && (i < (6 * (Config.BLOCK_SIZE/8)) + 32))) {
+                metafile[i] = MAC[i - (6*(Config.BLOCK_SIZE/8))];
+            }
+            else {
+                metafile[i] = '\0';
+            }
         }
 
-        save_to_file(toWrite.getBytes(), meta);
+        save_to_file(metafile, meta);
+
         return;
     }
 
@@ -220,9 +284,33 @@ public class EFS extends Utility {
         return null;
     }
     
-    public byte[] keyGeneration(String file_name, String password) {
-       
-        return null;
+    public byte[] keyGeneration(String file_name, String password) throws Exception {
+
+        //Create Key Array
+        byte[] iv = secureRandomNumber(16);
+        byte[] passwordArray = password.getBytes();
+        byte[] PassAndIV = concatArrays(iv, passwordArray);
+
+        byte[] hash = hash_SHA256(PassAndIV);
+        for (int i = 0; i<1000; i++) {
+            byte[] tmp = concatArrays(iv, hash);
+            hash = hash_SHA256(tmp);
+        }
+
+        byte[] key = new byte[16];
+        for(int i=0; i<16; i++) {
+            key[i] = hash[i];
+        }
+
+        /*
+        // Used to test byte array length and output
+        System.out.println(hash.length);
+        for(int i=0; i< hash.length ; i++) {
+            System.out.print(hash[i] +" ");
+         }
+         */
+
+        return key;
     }
 
     public byte[] CTREncrypt(byte[] content, byte[] key[], byte[] iv) {
