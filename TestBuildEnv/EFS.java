@@ -1,5 +1,9 @@
 import java.io.File;
 import java.lang.reflect.Array;
+import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.file.AccessDeniedException;
+import java.util.Arrays;
 
 public class EFS extends Utility {
 
@@ -35,7 +39,9 @@ public class EFS extends Utility {
 
         // Create 256 bit (32 bytes) salted password hash
         byte[] saltedHash = new byte[Config.BLOCK_SIZE/8];
-        byte[] hash256 = concatArrays(salt, password.getBytes());
+        byte[] hash256 = hash_SHA256(concatArrays(randomNum, password.getBytes()));
+        
+        
         for(int i=0; i<Config.BLOCK_SIZE/8; i++) {
             if(i < 32){
                 saltedHash[i] = hash256[i];
@@ -52,17 +58,6 @@ public class EFS extends Utility {
         }
         byte[] filesize = file_size.getBytes();
 
-        //Generate and Set CTR IV in metadata
-        byte[] CTR_IV = new byte[Config.BLOCK_SIZE/8];
-        randomNum = secureRandomNumber(16);
-        for(int i=0; i<Config.BLOCK_SIZE/8; i++) {
-            if(i < 16){
-                CTR_IV[i] = randomNum[i];
-            }
-            else {
-                CTR_IV[i] = '\0';
-            }
-        }
 
         //Generate and Set Keygen IV in metadata
         byte[] Key_IV = new byte[Config.BLOCK_SIZE/8];
@@ -77,11 +72,11 @@ public class EFS extends Utility {
         }
         
         // Initial Metadata
-        byte[] toWrite = concatArrays(username, concatArrays(salt, concatArrays(saltedHash, concatArrays(filesize, concatArrays(CTR_IV, Key_IV)))));
+        byte[] toWrite = concatArrays(username, concatArrays(salt, concatArrays(saltedHash, concatArrays(filesize, Key_IV))));
         // Pad for Block Size
         byte[] metafile = new byte[Config.BLOCK_SIZE];
         for(int i=0; i<Config.BLOCK_SIZE; i++) {
-            if(i < 6 * (Config.BLOCK_SIZE/8)) {
+            if(i < 5 * (Config.BLOCK_SIZE/8)) {
                 metafile[i] = toWrite[i];
             }
             else {
@@ -97,11 +92,11 @@ public class EFS extends Utility {
         
         //rewrite metafile w/ mac
         for(int i=0; i<Config.BLOCK_SIZE; i++) {
-            if(i < 6 * (Config.BLOCK_SIZE/8)) {
+            if(i < 5 * (Config.BLOCK_SIZE/8)) {
                 metafile[i] = toWrite[i];
             }
-            else if( (i >= 6 * (Config.BLOCK_SIZE/8) && (i < (6 * (Config.BLOCK_SIZE/8)) + 32))) {
-                metafile[i] = MAC[i - (6*(Config.BLOCK_SIZE/8))];
+            else if( (i >= 5 * (Config.BLOCK_SIZE/8) && (i < (5 * (Config.BLOCK_SIZE/8)) + 32))) {
+                metafile[i] = MAC[i - (5*(Config.BLOCK_SIZE/8))];
             }
             else {
                 metafile[i] = '\0';
@@ -285,8 +280,8 @@ public class EFS extends Utility {
         byte[] fileData = read_from_file(meta);
 
         //get portion of metadata without MAC
-        byte[] metaSlice = new byte[768];
-        for(int i = 0; i < 768; i++) {
+        byte[] metaSlice = new byte[639];
+        for(int i = 0; i < 639; i++) {
             metaSlice[i] = fileData[i];
         }
 
@@ -299,8 +294,16 @@ public class EFS extends Utility {
     
     public byte[] keyGeneration(String file_name, String password) throws Exception {
 
+        //Get IV from Metadata
+        File meta = new File(file_name, "0");
+        byte[] fileData = read_from_file(meta);
+
+        byte[] iv = new byte[16];
+        for(int i=0; i<16; i++) {
+            iv[i] = fileData[640+i];
+        }
+
         //Create Key Array
-        byte[] iv = secureRandomNumber(16);
         byte[] passwordArray = password.getBytes();
         byte[] PassAndIV = concatArrays(iv, passwordArray);
 
@@ -317,21 +320,143 @@ public class EFS extends Utility {
 
         /*
         // Used to test byte array length and output
-        System.out.println(hash.length);
-        for(int i=0; i< hash.length ; i++) {
-            System.out.print(hash[i] +" ");
+        System.out.println(iv.length);
+        for(int i=0; i< iv.length ; i++) {
+            System.out.print(iv[i] +" ");
          }
          */
 
         return key;
     }
 
-    public byte[] CTREncrypt(byte[] content, byte[] key[], byte[] iv) {
-        return null;
+    public byte[] CTREncrypt(byte[] content, byte[] key) throws Exception {
+        
+        byte[] block = new byte[16];
+        byte[] iv = secureRandomNumber(16);
+        BigInteger ivCounter = new BigInteger(iv);
+
+
+        //Pad content to be divisible by 128bits
+        //int length = content.length;
+        int padcount = 0;
+        if (content.length % 16 != 0) {
+            padcount = 16 - (content.length%16);
+        }
+        
+        byte[] paddedContent = new byte[content.length+padcount];
+        for(int i=0; i<content.length+padcount; i++) {
+            if (i<content.length) {
+                paddedContent[i] = content[i];
+            }
+            else {
+                paddedContent[i] = '\0';
+            }
+        }
+
+        //Create Cipher array with enough blocks for encrypted message.
+        byte[] cipher = new byte[iv.length + paddedContent.length];
+
+        //C0 = IV
+        for(int i=0; i<16; i++){
+            cipher[i] = iv[i];
+        }
+
+        //C1-Cn Using CTRAES128
+        for (int i=0; i<paddedContent.length/16; i++) {
+            
+            // Get 128bit Block Mi
+            int blockStart = i * 16;
+            int blockFinish = (i * 16) + 16;
+            block = Arrays.copyOfRange(paddedContent, blockStart, blockFinish);
+
+            //Block Encrypt IV++
+            BigInteger addition = new BigInteger(Integer.toString(1));
+            ivCounter = ivCounter.add(addition);
+            byte[] encryptIV = encript_AES(ivCounter.toByteArray(), key);
+
+            //XOR encryptIVi w/ Mi
+            BigInteger IVi = new BigInteger(encryptIV);
+            BigInteger blockI = new BigInteger(block);
+            BigInteger cipherI = IVi.xor(blockI);
+            block = cipherI.toByteArray();
+
+            //Add cipher block to completed cipher
+            for(int j=0; j<16; j++){
+                cipher[((i+1) * 16) + j] = block[j];
+            }
+            // Used to test byte array length and output
+            /*
+            System.out.println(cipher.length);
+            for(int j=0; j< cipher.length ; j++) {
+                System.out.print(cipher[j] +" ");
+            }
+            System.out.println(" ");
+            */
+        }
+        
+        return cipher;
     }
 
-    public byte[] CTRDecrypt(byte[] content, byte[] key[], byte[] iv) {
-        return null;
+    public byte[] CTRDecrypt(byte[] content, byte[] key) throws Exception {
+
+        byte[] block = new byte[16];
+        byte[] message = new byte[content.length -16];
+        //Get IV From First Block of Content
+        byte[] iv = new byte[16];
+        for(int i=0; i<16; i++){
+            iv[i] = content[i];
+        }
+        BigInteger ivCounter = new BigInteger(iv);
+
+
+        //C1-Cn Using CTRAES128
+        for (int i=1; i<content.length/16; i++) {
+            
+            // Get 128bit Block Ci
+            int blockStart = i * 16;
+            int blockFinish = (i * 16) + 16;
+            block = Arrays.copyOfRange(content, blockStart, blockFinish);
+
+            //Block Encrypt IV++
+            BigInteger addition = new BigInteger(Integer.toString(1));
+            ivCounter = ivCounter.add(addition);
+            byte[] encryptIV = encript_AES(ivCounter.toByteArray(), key);
+
+            //XOR encryptIVi w/ Ci
+            BigInteger IVi = new BigInteger(encryptIV);
+            BigInteger blockI = new BigInteger(block);
+            BigInteger messageI = IVi.xor(blockI);
+            block = messageI.toByteArray();
+
+
+            //Add cipher block to completed cipher
+            for(int j=0; j<16; j++){
+                message[((i-1) * 16) + j] = block[j];
+            }
+            // Used to test byte array length and output
+            /*
+            System.out.println(message.length);
+            for(int j=0; j< message.length ; j++) {
+                System.out.print(message[j] +" ");
+            }
+            System.out.println(" ");
+            */
+        }
+
+        //Get Rid of padding
+        for(int i=0; i<message.length; i++) {
+            // Check if last byte is null
+            if ((message[i] == 0x00) && (i+1 >= message.length)) {
+                return Arrays.copyOfRange(message, 0, i);
+            }
+            // Return array without trailing padding
+            else if ((message[i] == 0x00) && (message[i+1] == 0x00)) {
+                return Arrays.copyOfRange(message, 0, i);
+            }
+        }
+
+
+        return message;
     }
 
 
@@ -359,4 +484,5 @@ public class EFS extends Utility {
     
         return result;
     }
+
 }

@@ -2,17 +2,16 @@
 Create(file_name, user_name, password);
     create file directory from file_name
     create and populate metadata
-        000-127 = username + padding
+        000-127 = username + padding 
         128-255 = 128 bit (16 bytes) random salt
-        256-383 = hash_sha256(salt||password) + padding
+        256-383 = hash_sha256(salt||password) + padding (32 bytes)
         384-511 = length of of file(bytes) + padding
-        512-639 = CTR IV + padding
-        640-767 = Keygen IV + Padding
+        512-639 = Keygen IV + Padding (16 bytes)
     write metadata to "../filename.txt/0"
 
     generate key from metadata
     generateMAC("../filename.txt/0")
-        768-895 = MAC(0 - n)
+        640-767 = MAC(0 - n) (32 bytes)
         
 
 // Lizbeth
@@ -39,11 +38,11 @@ generateMac(key,fileDir)
 
 
 // Payton
-Encrypt(byte[] content, key, IV)
+Encrypt(byte[] content, key, filename)
     return byte[] cipher
 
 // Payton
-Decrypt(bytearray[] content, key, IV)
+Decrypt(bytearray[] content, key, filename)
     return byte[] message
 
 // Lizbeth
@@ -177,5 +176,3 @@ check_integrity(file_name, password)
         return false
     else
         return true
-
-
