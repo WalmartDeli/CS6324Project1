@@ -1,8 +1,6 @@
 import java.io.File;
 import java.lang.reflect.Array;
 import java.math.BigInteger;
-import java.nio.ByteBuffer;
-import java.nio.file.AccessDeniedException;
 import java.util.Arrays;
 
 public class EFS extends Utility {
@@ -20,6 +18,7 @@ public class EFS extends Utility {
         File meta = new File(dir, "0");
 
         //Create username portion of Block
+        user_name += "\n";
         while(user_name.length() < (Config.BLOCK_SIZE/8)) {
             user_name += '\0';
         }
@@ -53,6 +52,7 @@ public class EFS extends Utility {
 
         //Set file_size(bytes) of File to 0 and create seciton
         String file_size = "0";
+        file_size += "\n";
         while(file_size.length() < (Config.BLOCK_SIZE/8)) {
             file_size += '\0';
         }
@@ -110,19 +110,36 @@ public class EFS extends Utility {
 
     @Override
     public String findUser(String file_name) throws Exception {
-        File file = new File(file_name);
-        File meta = new File(file, "0");
-        String s = byteArray2String(read_from_file(meta));
+        
+        File meta = new File(file_name, "0");
+
+        //Integrity Check Here
+
+        //Get User
+        byte[] fileData = read_from_file(meta);
+        byte[] username = Arrays.copyOfRange(fileData, 0, 128);
+
+        String s = byteArray2String(username);
         String[] strs = s.split("\n");
-        return strs[1];
+        return strs[0];
     }
 
     @Override
     public int length(String file_name, String password) throws Exception {
-        File file = new File(file_name);
-        File meta = new File(file, "0");
-        String s = byteArray2String(read_from_file(meta));
+ 
+        File meta = new File(file_name, "0");
+
+
+        //Integrity Check Here
+        //Password Check here
+
+        //Get Length
+        byte[] fileData = read_from_file(meta);
+        byte[] length = Arrays.copyOfRange(fileData, 384, 511);
+
+        String s = byteArray2String(length);
         String[] strs = s.split("\n");
+
         return Integer.parseInt(strs[0]);
     }
 
@@ -271,8 +288,25 @@ public class EFS extends Utility {
         save_to_file(toWrite.getBytes(), new File(root, "0"));
     }
 
-    public byte[] userAuthentication(String file_name, String password) {
-        return null;
+    public byte[] userAuthentication(String file_name, String password) throws Exception {
+
+        File meta = new File(file_name, "0");
+        byte[] fileData = read_from_file(meta);
+
+        //Get password salt
+        byte[] salt = Arrays.copyOfRange(fileData, 128, 128 + 16);
+        //Get password hash
+        byte[] passwordHash = Arrays.copyOfRange(fileData, 256, 256 + 32);
+
+        //Generate hashed password from salt+password
+        byte[] hash256 = hash_SHA256(concatArrays(salt, password.getBytes()));
+        if (Arrays.equals(hash256, passwordHash)) {
+            return keyGeneration(file_name, password);
+        }
+        else {
+                throw new PasswordIncorrectException();
+        }
+
     }
 
     public byte[] generateMAC(String file_name, byte[] key) throws Exception {
