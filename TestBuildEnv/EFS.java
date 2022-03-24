@@ -87,7 +87,7 @@ public class EFS extends Utility {
         save_to_file(metafile, meta); //write metadata to get mac from.
 
         // generate MAC
-        byte[] key = keyGeneration(file_name, password);
+        byte[] key = userAuthentication(file_name, password);
         byte[] MAC = generateMAC(file_name, key);
         
         //rewrite metafile w/ mac
@@ -243,8 +243,20 @@ public class EFS extends Utility {
     }
 
     @Override
-    public boolean check_integrity(String file_name, String password) {
-        return false;
+    public boolean check_integrity(String file_name, String password) throws Exception {
+        byte[] mac = getMetaMac(file_name);
+        byte[] key = userAuthentication(file_name, password);
+        byte[] newMac = generateMAC(file_name, key);
+
+        // if stored mac is different than generated mac then throw exception
+        for (int i = 0; i < mac.length; i++) {
+            if (mac[i] != newMac[i]) {
+                //System.out.println("ERROR: MACs do not match");
+                throw new Exception();
+            }
+        }
+        //System.out.println("MACs matched");
+        return true;
     }
 
     @Override
@@ -334,7 +346,7 @@ public class EFS extends Utility {
 
         byte[] iv = new byte[16];
         for(int i=0; i<16; i++) {
-            iv[i] = fileData[640+i];
+            iv[i] = fileData[512+i];
         }
 
         //Create Key Array
@@ -517,6 +529,16 @@ public class EFS extends Utility {
         System.arraycopy(array2, 0, result, len1, len2);
     
         return result;
+    }
+
+    public byte[] getMetaMac(String file_name) throws Exception {
+        File meta = new File(file_name, "0");
+        byte[] fileData = read_from_file(meta);
+
+        //get portion of metadata with MAC
+        byte[] macSlice = Arrays.copyOfRange(fileData, 640, 640 + 32);
+
+        return macSlice;
     }
 
 }
