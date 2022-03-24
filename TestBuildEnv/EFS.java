@@ -176,13 +176,16 @@ public class EFS extends Utility {
     public void write(String file_name, int starting_position, byte[] content, String password) throws Exception {
         String str_content = byteArray2String(content);
         File root = new File(file_name);
+        check_integrity(file_name, password);
         int file_length = length(file_name, password);
 
         if (starting_position > file_length) {
             throw new Exception();
         }
 
+        byte[] key = userAuthentication(file_name, password);
 
+        // write content
         int len = str_content.length();
         int start_block = starting_position / Config.BLOCK_SIZE;
         int end_block = (starting_position + len) / Config.BLOCK_SIZE;
@@ -193,7 +196,8 @@ public class EFS extends Utility {
             String postfix = "";
             if (i == start_block + 1 && starting_position != start_block * Config.BLOCK_SIZE) {
 
-                prefix = byteArray2String(read_from_file(new File(root, Integer.toString(i))));
+                byte[] encryptedPrefix = read_from_file(new File(root, Integer.toString(i)));
+                prefix = byteArray2String(CTRDecrypt(encryptedPrefix, key));
                 prefix = prefix.substring(0, starting_position - start_block * Config.BLOCK_SIZE);
                 sp = Math.max(sp, 0);
             }
@@ -202,7 +206,8 @@ public class EFS extends Utility {
                 File end = new File(root, Integer.toString(i));
                 if (end.exists()) {
 
-                    postfix = byteArray2String(read_from_file(new File(root, Integer.toString(i))));
+                    byte[] encryptedPostfix = read_from_file(new File(root, Integer.toString(i)));
+                    postfix = byteArray2String(CTRDecrypt(encryptedPostfix, key));
 
                     if (postfix.length() > starting_position + len - end_block * Config.BLOCK_SIZE) {
                         postfix = postfix.substring(starting_position + len - end_block * Config.BLOCK_SIZE);
@@ -214,6 +219,8 @@ public class EFS extends Utility {
             }
 
             String toWrite = prefix + str_content.substring(sp, ep) + postfix;
+            byte[] writeArray = toWrite.getBytes();
+            toWrite = byteArray2String(CTREncrypt(writeArray, key));
 
             while (toWrite.length() < Config.BLOCK_SIZE) {
                 toWrite += '\0';
@@ -224,19 +231,33 @@ public class EFS extends Utility {
 
 
         //update meta data
-
         if (content.length + starting_position > length(file_name, password)) {
-            String s = byteArray2String(read_from_file(new File(root, "0")));
-            String[] strs = s.split("\n");
-            strs[0] = Integer.toString(content.length + starting_position);
-            String toWrite = "";
-            for (String t : strs) {
-                toWrite += t + "\n";
+            byte[] meta = read_from_file(new File(root, "0"));
+
+            // update length
+            int newFileLength = len + file_length;
+            String tempLen = String.valueOf(newFileLength);
+            tempLen += "\n";
+            while(tempLen.length() < (Config.BLOCK_SIZE/8)) {
+                tempLen += '\0';
             }
-            while (toWrite.length() < Config.BLOCK_SIZE) {
-                toWrite += '\0';
+            byte[] length = tempLen.getBytes();
+            for (int i = 0; i < length.length; i++) {
+                meta[i + 384] = length[i];
             }
-            save_to_file(toWrite.getBytes(), new File(root, "0"));
+
+            //update MAC
+            byte[] MAC = generateMAC(file_name, key);
+            for (int i = 640; i < Config.BLOCK_SIZE; i++) {
+                if (i < MAC.length + 640) {
+                    meta[i] = MAC[i - 640];
+                }
+                else {
+                    meta[i] = '\0';
+                }
+            }
+
+            save_to_file(meta, new File(root, "0"));
 
         }
 
@@ -322,20 +343,34 @@ public class EFS extends Utility {
     }
 
     public byte[] generateMAC(String file_name, byte[] key) throws Exception {
-        File meta = new File(file_name, "0");
-        byte[] fileData = read_from_file(meta);
+        File root = new File(file_name);
+        byte[] metaData = read_from_file(new File(root, "0"));
+        int numFilesInDir = root.list().length;
+        byte[][] macs = new byte[numFilesInDir][];
 
         //get portion of metadata without MAC
-        byte[] metaSlice = new byte[639];
-        for(int i = 0; i < 639; i++) {
-            metaSlice[i] = fileData[i];
-        }
+        byte[] metaWithoutMac = Arrays.copyOfRange(metaData, 0, 639);
 
         // concat key and metadata and get hash
-        byte[] keyAndMetadata = concatArrays(key, metaSlice);
-        byte[] hash = hash_SHA256(keyAndMetadata);
+        byte[] keyAndMetadata = concatArrays(key, metaWithoutMac);
 
-        return hash;
+        // metadata mac
+        macs[0] = hash_SHA256(keyAndMetadata);
+        // subsequent data file macs
+        for (int i = 1; i < numFilesInDir; i++) {
+            byte[] fileData = read_from_file(new File(root, Integer.toString(i)));
+            keyAndMetadata = concatArrays(key, fileData);
+            macs[i] = hash_SHA256(keyAndMetadata);
+        }
+
+        // concat all macs and gets its mac
+        byte[] allMacs = macs[0];
+        for (int i = 1; i < numFilesInDir; i++) {
+             allMacs = concatArrays(allMacs, macs[i]);
+        }
+        byte[] finalMac = concatArrays(key, allMacs);
+        
+        return finalMac;
     }
     
     public byte[] keyGeneration(String file_name, String password) throws Exception {
