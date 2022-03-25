@@ -36,6 +36,7 @@ public class TestBuild {
 			efs.create(filename, efs.username, efs.password);
 			byte[] ori_content = "Hello World!".getBytes();
 			efs.write(filename, 0, ori_content, efs.password);
+			efs.cut(filename,5,efs.password);
 			
 			byte[] content = efs.read(filename, 0, ori_content.length, efs.password);
 			
