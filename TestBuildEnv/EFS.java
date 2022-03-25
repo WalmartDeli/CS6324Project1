@@ -388,6 +388,9 @@ public class EFS extends Utility {
             meta[i + 384] = length[i];
         }
 
+        //Write length to file so new MAC includes new length
+        save_to_file(meta, new File(root, "0"));
+
         //Update MAC
         byte[] MAC = generateMAC(file_name, key);
         for (int i = 640; i < Config.BLOCK_SIZE; i++) {
