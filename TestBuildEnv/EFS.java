@@ -274,37 +274,34 @@ public class EFS extends Utility {
         }
 
         //update meta data
-        if (content.length + starting_position > length(file_name, password)) {
-            byte[] meta = read_from_file(new File(root, "0"));
+        byte[] meta = read_from_file(new File(root, "0"));
 
-            // update length
-            String tempLen = String.valueOf(messageLen); // convert to string
-            tempLen += "\n";    // add new line for readability
-            while(tempLen.length() < (Config.BLOCK_SIZE/8)) {   // padding
-                tempLen += '\0';
-            }
-            byte[] length = tempLen.getBytes();
-            for (int i = 0; i < length.length; i++) { // copy new length to previous data
-                meta[i + 384] = length[i];
-            }
-
-            // write length to file so new MAC includes new length
-            save_to_file(meta, new File(root, "0"));
-
-            //update MAC
-            byte[] MAC = generateMAC(file_name, key);
-            for (int i = 640; i < Config.BLOCK_SIZE; i++) { // copy new mac to previous data
-                if (i < MAC.length + 640) {
-                    meta[i] = MAC[i - 640];
-                }
-                else { // add padding
-                    meta[i] = '\0';
-                }
-            }
-
-            save_to_file(meta, new File(root, "0"));
-
+        // update length
+        String tempLen = String.valueOf(messageLen); // convert to string
+        tempLen += "\n";    // add new line for readability
+        while(tempLen.length() < (Config.BLOCK_SIZE/8)) {   // padding
+            tempLen += '\0';
         }
+        byte[] length = tempLen.getBytes();
+        for (int i = 0; i < length.length; i++) { // copy new length to previous data
+            meta[i + 384] = length[i];
+        }
+
+        // write length to file so new MAC includes new length
+        save_to_file(meta, new File(root, "0"));
+
+        //update MAC
+        byte[] MAC = generateMAC(file_name, key);
+        for (int i = 640; i < Config.BLOCK_SIZE; i++) { // copy new mac to previous data
+            if (i < MAC.length + 640) {
+                meta[i] = MAC[i - 640];
+            }
+            else { // add padding
+                meta[i] = '\0';
+            }
+        }
+
+        save_to_file(meta, new File(root, "0"));
 
     }
 
