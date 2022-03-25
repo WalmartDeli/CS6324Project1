@@ -167,20 +167,25 @@ public class EFS extends Utility {
         byte[] key = userAuthentication(file_name, password);
 
         // decrypt content if files other that metadata exist
+        byte[] encData = new byte[numFilesInDir * Config.BLOCK_SIZE];
         byte[] decData = new byte[numFilesInDir * Config.BLOCK_SIZE];
         if(numFilesInDir > 1) {
-            // read data from every file and decrypt
-            byte[][] decryptedData2d = new byte[numFilesInDir][];
+            // read data from every file
+            byte[][] encryptedData2d = new byte[numFilesInDir][];
             for (int i = 1; i < numFilesInDir; i++) {
                 byte[] encryptedData = read_from_file(new File(root, Integer.toString(i)));
-                decryptedData2d[i] = CTRDecrypt(encryptedData, key);
+                encryptedData2d[i] = encryptedData;
             }
+
             // collapse each blocks data into a single byte array
-            decData = decryptedData2d[1];
+            encData = encryptedData2d[1];
             //String tempData2 = byteArray2String(decryptedData);
             for (int i = 2; i < numFilesInDir; i++) {
-                decData = concatArrays(decData, decryptedData2d[i]);
+                encData = concatArrays(encData, encryptedData2d[i]);
             }
+
+            // decrypt data
+            decData = CTRDecrypt(encData, key);
         }
         
         // get rid of null bytes
@@ -189,7 +194,16 @@ public class EFS extends Utility {
             --numNulls;
         }
         byte[] decryptedData = Arrays.copyOfRange(decData, 0, numNulls + 1);
-        return decryptedData;
+
+        // return only data that we requested with start_pos and len
+        byte[] decDataSub = new byte[len];
+        for (int i = 0; i < decryptedData.length; i++) {
+            if (i >= starting_position && i < (starting_position + len)) {
+                decDataSub[i - starting_position] = decryptedData[i];
+            }
+        }
+
+        return decDataSub;
 
     }
 
@@ -206,31 +220,9 @@ public class EFS extends Utility {
         }
 
         byte[] key = userAuthentication(file_name, password);
+        // decrypt already written data
+        byte[] decryptedData = read(file_name, 0, file_length, password);
 
-        // decrypt content if files other that metadata exist
-        byte[] decData = new byte[numFilesInDir * Config.BLOCK_SIZE];
-        if(numFilesInDir > 1) {
-            // read data from every file and decrypt
-            byte[][] decryptedData2d = new byte[numFilesInDir][];
-            for (int i = 1; i < numFilesInDir; i++) {
-                byte[] encryptedData = read_from_file(new File(root, Integer.toString(i)));
-                decryptedData2d[i] = CTRDecrypt(encryptedData, key);
-            }
-            // collapse each blocks data into a single byte array
-            decData = decryptedData2d[1];
-            //String tempData2 = byteArray2String(decryptedData);
-            for (int i = 2; i < numFilesInDir; i++) {
-                decData = concatArrays(decData, decryptedData2d[i]);
-            }
-        }
-        
-        // get rid of null bytes
-        int numNulls = decData.length - 1;
-        while (numNulls > -1 && decData[numNulls] == 0) {
-            --numNulls;
-        }
-        byte[] decryptedData = Arrays.copyOfRange(decData, 0, numNulls + 1);
-        
         // combine decryptedData with input content
         int messageLen = decryptedData.length + content.length;
         byte[] message = new byte[messageLen];
