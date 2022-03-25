@@ -157,32 +157,39 @@ public class EFS extends Utility {
     public byte[] read(String file_name, int starting_position, int len, String password) throws Exception {
         File root = new File(file_name);
         check_integrity(file_name, password);
+        int numFilesInDir = root.list().length;
         int file_length = length(file_name, password);
-        if (starting_position + len > file_length) {
+
+        if (starting_position > file_length) {
             throw new Exception();
         }
 
-        int numBlocks = file_length/ Config.BLOCK_SIZE;
-        byte[] cipher = new byte[numBlocks * Config.BLOCK_SIZE];
+        byte[] key = userAuthentication(file_name, password);
 
-        //Read entire file into array
-        for (int i=0; i<numBlocks; i++) {
-            //read entire block into array
-            byte[] tmp = read_from_file(new File(root, Integer.toString(i)));
-            
-            //add array to cipher array
-            for(int j=0; j<tmp.length; j++) {
-                cipher[(i * Config.BLOCK_SIZE) + j] = tmp[j];
+        // decrypt content if files other that metadata exist
+        byte[] decData = new byte[numFilesInDir * Config.BLOCK_SIZE];
+        if(numFilesInDir > 1) {
+            // read data from every file and decrypt
+            byte[][] decryptedData2d = new byte[numFilesInDir][];
+            for (int i = 1; i < numFilesInDir; i++) {
+                byte[] encryptedData = read_from_file(new File(root, Integer.toString(i)));
+                decryptedData2d[i] = CTRDecrypt(encryptedData, key);
+            }
+            // collapse each blocks data into a single byte array
+            decData = decryptedData2d[1];
+            //String tempData2 = byteArray2String(decryptedData);
+            for (int i = 2; i < numFilesInDir; i++) {
+                decData = concatArrays(decData, decryptedData2d[i]);
             }
         }
-
-        //Decrypt the cipher
-        byte[] key = userAuthentication(file_name, password);
-        byte[] message = CTRDecrypt(cipher, key);
-
-        byte[] messageSnippet = Arrays.copyOfRange(message, starting_position, starting_position+len);
-
-        return messageSnippet;
+        
+        // get rid of null bytes
+        int numNulls = decData.length - 1;
+        while (numNulls > -1 && decData[numNulls] == 0) {
+            --numNulls;
+        }
+        byte[] decryptedData = Arrays.copyOfRange(decData, 0, numNulls + 1);
+        return decryptedData;
 
     }
 
