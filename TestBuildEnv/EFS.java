@@ -134,9 +134,6 @@ public class EFS extends Utility {
         //Get to file directory
         File root = new File(file_name);
 
-        //Integrity Check Here
-        check_integrity(file_name, password);
-
         //Password Check here
         userAuthentication(file_name, password);
 
