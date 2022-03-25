@@ -159,29 +159,33 @@ public class EFS extends Utility {
     @Override
     public byte[] read(String file_name, int starting_position, int len, String password) throws Exception {
         File root = new File(file_name);
+        check_integrity(file_name, password);
         int file_length = length(file_name, password);
         if (starting_position + len > file_length) {
             throw new Exception();
         }
 
-        int start_block = starting_position / Config.BLOCK_SIZE;
+        int numBlocks = file_length/ Config.BLOCK_SIZE;
+        byte[] cipher = new byte[numBlocks * Config.BLOCK_SIZE];
 
-        int end_block = (starting_position + len) / Config.BLOCK_SIZE;
-
-        String toReturn = "";
-
-        for (int i = start_block + 1; i <= end_block + 1; i++) {
-            String temp = byteArray2String(read_from_file(new File(root, Integer.toString(i))));
-            if (i == end_block + 1) {
-                temp = temp.substring(0, starting_position + len - end_block * Config.BLOCK_SIZE);
+        //Read entire file into array
+        for (int i=0; i<numBlocks; i++) {
+            //read entire block into array
+            byte[] tmp = read_from_file(new File(root, Integer.toString(i)));
+            
+            //add array to cipher array
+            for(int j=0; j<tmp.length; j++) {
+                cipher[(i * Config.BLOCK_SIZE) + j] = tmp[j];
             }
-            if (i == start_block + 1) {
-                temp = temp.substring(starting_position - start_block * Config.BLOCK_SIZE);
-            }
-            toReturn += temp;
         }
 
-        return toReturn.getBytes("UTF-8");
+        //Decrypt the cipher
+        byte[] key = userAuthentication(file_name, password);
+        byte[] message = CTRDecrypt(cipher, key);
+
+        byte[] messageSnippet = Arrays.copyOfRange(message, starting_position, starting_position+len);
+
+        return messageSnippet;
 
     }
 
