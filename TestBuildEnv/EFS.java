@@ -360,10 +360,8 @@ public class EFS extends Utility {
         }
 
         //Encrypt the file
-        byte[] newFile = file.getBytes();
-        file = byteArray2String(CTREncrypt(newFile, key));
-
-        save_to_file(file.getBytes(), new File(root, Integer.toString(end_block + 1)));
+        byte[] newFile = CTREncrypt(file.getBytes(), key);
+        save_to_file(newFile, new File(root, Integer.toString(end_block + 1)));
 
         //Delete excess file from memory
 
