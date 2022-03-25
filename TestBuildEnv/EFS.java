@@ -110,37 +110,50 @@ public class EFS extends Utility {
 
     @Override
     public String findUser(String file_name) throws Exception {
-        
-        File meta = new File(file_name, "0");
+        //Get to file directory
+        File root = new File(file_name);
 
-        //Integrity Check Here
+        //Open metadata file
+        byte[] meta = read_from_file(new File(root, "0"));
 
-        //Get User
-        byte[] fileData = read_from_file(meta);
-        byte[] username = Arrays.copyOfRange(fileData, 0, 128);
+        //Get username from metadata
+        byte[] user = Arrays.copyOfRange(meta, 0, 127);
 
-        String s = byteArray2String(username);
-        String[] strs = s.split("\n");
-        return strs[0];
+        //Convert to a string
+        String userField = byteArray2String(user);
+
+        //Remove '\n' at the end of the username
+        String[] username = userField.split("\n");
+
+        //Return username
+        return username[0];
     }
 
     @Override
     public int length(String file_name, String password) throws Exception {
- 
-        File meta = new File(file_name, "0");
-
+        //Get to file directory
+        File root = new File(file_name);
 
         //Integrity Check Here
+        check_integrity(file_name, password);
+
         //Password Check here
+        userAuthentication(file_name, password);
 
-        //Get Length
-        byte[] fileData = read_from_file(meta);
-        byte[] length = Arrays.copyOfRange(fileData, 384, 511);
+        //Open metadata file
+        byte[] meta = read_from_file(new File(root, "0"));
 
-        String s = byteArray2String(length);
-        String[] strs = s.split("\n");
+        //Get Length from metadata
+        byte[] len = Arrays.copyOfRange(meta, 384, 511);
 
-        return Integer.parseInt(strs[0]);
+        //Convert to a string
+        String lengthField = byteArray2String(len);
+
+        //Remove '\n' at the end of the length
+        String[] length = lengthField.split("\n");
+
+        //Return length
+        return Integer.parseInt(length[0]);
     }
 
     @Override
@@ -282,43 +295,82 @@ public class EFS extends Utility {
 
     @Override
     public void cut(String file_name, int len, String password) throws Exception {
-
+        //Create new file from filename
         File root = new File(file_name);
+
+        //Check Integrity
+        check_integrity(file_name, password);
+
+        //Get file length
         int file_length = length(file_name, password);
+
+        //Authenticate user
+
+        byte[] key = userAuthentication(file_name, password);
+
+        //Make sure len !> file_length
 
         if (len > file_length) {
             throw new Exception();
         }
-        int end_block = (len) / Config.BLOCK_SIZE;
 
-        File file = new File(root, Integer.toString(end_block + 1));
-        String str = byteArray2String(read_from_file(file));
-        str = str.substring(0, len - end_block * Config.BLOCK_SIZE);
-        while (str.length() < Config.BLOCK_SIZE) {
-            str += '\0';
+        //Calculate new end block the file will be cut to
+
+        int end_block = len / Config.BLOCK_SIZE;
+
+        //Decrypt All blocks
+
+        byte[] encryptedFile = read_from_file(new File(root, Integer.toString(end_block + 1)));
+        String file = byteArray2String(CTRDecrypt(encryptedFile, key));
+
+        //Cut the file to the desired size 
+
+        file = file.substring(0, len - end_block * Config.BLOCK_SIZE);
+        while (file.length() < Config.BLOCK_SIZE) {
+            file += '\0';
         }
 
-        save_to_file(str.getBytes(), file);
+        //Encrypt the file
+        byte[] newFile = file.getBytes();
+        file = byteArray2String(CTREncrypt(newFile, key));
 
-        int cur = end_block + 2;
-        file = new File(root, Integer.toString(cur));
-        while (file.exists()) {
-            file.delete();
-            cur++;
+        save_to_file(file.getBytes(), new File(root, Integer.toString(end_block + 1)));
+
+        //Delete excess file from memory
+
+        int current = end_block + 2;
+        File extra = new File(root, Integer.toString(current));
+        while (extra.exists()) {
+            extra.delete();
+            current++;
         }
 
-        //update meta data
-        String s = byteArray2String(read_from_file(new File(root, "0")));
-        String[] strs = s.split("\n");
-        strs[0] = Integer.toString(len);
-        String toWrite = "";
-        for (String t : strs) {
-            toWrite += t + "\n";
+        //Update meta data
+        byte[] meta = read_from_file(new File(root, "0"));
+
+        // Update length
+        String tempLen = String.valueOf(len);
+        tempLen += "\n";
+        while(tempLen.length() < (Config.BLOCK_SIZE/8)) {
+            tempLen += '\0';
         }
-        while (toWrite.length() < Config.BLOCK_SIZE) {
-            toWrite += '\0';
+        byte[] length = tempLen.getBytes();
+        for (int i = 0; i < length.length; i++) {
+            meta[i + 384] = length[i];
         }
-        save_to_file(toWrite.getBytes(), new File(root, "0"));
+
+        //Update MAC
+        byte[] MAC = generateMAC(file_name, key);
+        for (int i = 640; i < Config.BLOCK_SIZE; i++) {
+            if (i < MAC.length + 640) {
+                meta[i] = MAC[i - 640];
+            }
+            else {
+                meta[i] = '\0';
+            }
+        }
+
+        save_to_file(meta, new File(root, "0"));
     }
 
     public byte[] userAuthentication(String file_name, String password) throws Exception {
