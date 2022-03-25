@@ -189,11 +189,12 @@ public class EFS extends Utility {
 
     }
 
+
     @Override
     public void write(String file_name, int starting_position, byte[] content, String password) throws Exception {
-        String str_content = byteArray2String(content);
         File root = new File(file_name);
         check_integrity(file_name, password);
+        int numFilesInDir = root.list().length;
         int file_length = length(file_name, password);
 
         if (starting_position > file_length) {
@@ -202,74 +203,97 @@ public class EFS extends Utility {
 
         byte[] key = userAuthentication(file_name, password);
 
-        // write content
-        int len = str_content.length();
-        int start_block = starting_position / Config.BLOCK_SIZE;
-        int end_block = (starting_position + len) / Config.BLOCK_SIZE;
-        for (int i = start_block + 1; i <= end_block + 1; i++) {
-            int sp = (i - 1) * Config.BLOCK_SIZE - starting_position;
-            int ep = (i) * Config.BLOCK_SIZE - starting_position;
-            String prefix = "";
-            String postfix = "";
-            if (i == start_block + 1 && starting_position != start_block * Config.BLOCK_SIZE) {
-
-                byte[] encryptedPrefix = read_from_file(new File(root, Integer.toString(i)));
-                prefix = byteArray2String(CTRDecrypt(encryptedPrefix, key));
-                prefix = prefix.substring(0, starting_position - start_block * Config.BLOCK_SIZE);
-                sp = Math.max(sp, 0);
+        // decrypt content if files other that metadata exist
+        byte[] decData = new byte[numFilesInDir * Config.BLOCK_SIZE];
+        if(numFilesInDir > 1) {
+            // read data from every file and decrypt
+            byte[][] decryptedData2d = new byte[numFilesInDir][];
+            for (int i = 1; i < numFilesInDir; i++) {
+                byte[] encryptedData = read_from_file(new File(root, Integer.toString(i)));
+                decryptedData2d[i] = CTRDecrypt(encryptedData, key);
             }
-
-            if (i == end_block + 1) {
-                File end = new File(root, Integer.toString(i));
-                if (end.exists()) {
-
-                    byte[] encryptedPostfix = read_from_file(new File(root, Integer.toString(i)));
-                    postfix = byteArray2String(CTRDecrypt(encryptedPostfix, key));
-
-                    if (postfix.length() > starting_position + len - end_block * Config.BLOCK_SIZE) {
-                        postfix = postfix.substring(starting_position + len - end_block * Config.BLOCK_SIZE);
-                    } else {
-                        postfix = "";
-                    }
-                }
-                ep = Math.min(ep, len);
+            // collapse each blocks data into a single byte array
+            decData = decryptedData2d[1];
+            //String tempData2 = byteArray2String(decryptedData);
+            for (int i = 2; i < numFilesInDir; i++) {
+                decData = concatArrays(decData, decryptedData2d[i]);
             }
-
-            String toWrite = prefix + str_content.substring(sp, ep) + postfix;
-            byte[] writeArray = toWrite.getBytes();
-            toWrite = byteArray2String(CTREncrypt(writeArray, key));
-
-            while (toWrite.length() < Config.BLOCK_SIZE) {
-                toWrite += '\0';
+        }
+        
+        // get rid of null bytes
+        int numNulls = decData.length - 1;
+        while (numNulls > -1 && decData[numNulls] == 0) {
+            --numNulls;
+        }
+        byte[] decryptedData = Arrays.copyOfRange(decData, 0, numNulls + 1);
+        
+        // combine decryptedData with input content
+        int messageLen = decryptedData.length + content.length;
+        byte[] message = new byte[messageLen];
+        int j = 0;
+        for (int i = 0; i < messageLen; i++) {
+            if (i >= starting_position && i < (starting_position + content.length)) {
+                message[i] = content[i - starting_position];
+            } else {
+                message[i] = decryptedData[j];
+                j++;
             }
-
-            save_to_file(toWrite.getBytes(), new File(root, Integer.toString(i)));
         }
 
+        // pad content to be divisible by block length
+        int padLen = 0;
+        if (message.length % Config.BLOCK_SIZE != 0) {
+            padLen = Config.BLOCK_SIZE - (message.length % Config.BLOCK_SIZE);
+        }
+
+        // add padding to message
+        byte[] paddedMessage = new byte[message.length + padLen];
+        for(int i = 0; i < message.length + padLen; i++) {
+            if (i < message.length) {
+                paddedMessage[i] = message[i];
+            }
+            else {
+                paddedMessage[i] = '\0';
+            }
+        }
+
+        // Encrypt padded message
+        byte[] EncryptedMessage = CTREncrypt(paddedMessage, key);
+
+        // Write content in blocks to file
+        int numBlocks = paddedMessage.length / Config.BLOCK_SIZE;
+        for (int i = 1; i < numBlocks + 1; i++) {
+            int StartPos = (i - 1) * Config.BLOCK_SIZE;
+            int EndPos = i * Config.BLOCK_SIZE;
+            byte[] subEncMessage = Arrays.copyOfRange(EncryptedMessage, StartPos, EndPos);
+            save_to_file(subEncMessage, new File(root, Integer.toString(i)));
+        }
 
         //update meta data
         if (content.length + starting_position > length(file_name, password)) {
             byte[] meta = read_from_file(new File(root, "0"));
 
             // update length
-            int newFileLength = len + file_length;
-            String tempLen = String.valueOf(newFileLength);
-            tempLen += "\n";
-            while(tempLen.length() < (Config.BLOCK_SIZE/8)) {
+            String tempLen = String.valueOf(messageLen); // convert to string
+            tempLen += "\n";    // add new line for readability
+            while(tempLen.length() < (Config.BLOCK_SIZE/8)) {   // padding
                 tempLen += '\0';
             }
             byte[] length = tempLen.getBytes();
-            for (int i = 0; i < length.length; i++) {
+            for (int i = 0; i < length.length; i++) { // copy new length to previous data
                 meta[i + 384] = length[i];
             }
 
+            // write length to file so new MAC includes new length
+            save_to_file(meta, new File(root, "0"));
+
             //update MAC
             byte[] MAC = generateMAC(file_name, key);
-            for (int i = 640; i < Config.BLOCK_SIZE; i++) {
+            for (int i = 640; i < Config.BLOCK_SIZE; i++) { // copy new mac to previous data
                 if (i < MAC.length + 640) {
                     meta[i] = MAC[i - 640];
                 }
-                else {
+                else { // add padding
                     meta[i] = '\0';
                 }
             }
@@ -424,8 +448,9 @@ public class EFS extends Utility {
         for (int i = 1; i < numFilesInDir; i++) {
              allMacs = concatArrays(allMacs, macs[i]);
         }
-        byte[] finalMac = concatArrays(key, allMacs);
-        
+        byte[] keyAndAllMacs = concatArrays(key, allMacs);
+        byte[] finalMac = hash_SHA256(keyAndAllMacs);
+
         return finalMac;
     }
     
@@ -512,10 +537,9 @@ public class EFS extends Utility {
             byte[] encryptIV = encript_AES(ivCounter.toByteArray(), key);
 
             //XOR encryptIVi w/ Mi
-            BigInteger IVi = new BigInteger(encryptIV);
-            BigInteger blockI = new BigInteger(block);
-            BigInteger cipherI = IVi.xor(blockI);
-            block = cipherI.toByteArray();
+            for(int j=0; j<16; j++) {
+                block[j] = (byte)(block[j] ^ encryptIV[j]);
+            }
 
             //Add cipher block to completed cipher
             for(int j=0; j<16; j++){
@@ -560,10 +584,9 @@ public class EFS extends Utility {
             byte[] encryptIV = encript_AES(ivCounter.toByteArray(), key);
 
             //XOR encryptIVi w/ Ci
-            BigInteger IVi = new BigInteger(encryptIV);
-            BigInteger blockI = new BigInteger(block);
-            BigInteger messageI = IVi.xor(blockI);
-            block = messageI.toByteArray();
+            for(int j=0; j<16; j++) {
+                block[j] = (byte)(block[j] ^ encryptIV[j]);
+            }
 
 
             //Add cipher block to completed cipher
